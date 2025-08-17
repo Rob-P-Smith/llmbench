@@ -290,72 +290,139 @@ class ModelSelector:
                 return None
 
 def main():
-    """Main application entry point"""
+    """Main application entry point with continuous menu loop"""
     
-    # First, ask for connection type
-    connection_type = display_connection_type_menu()
-    if not connection_type:
-        return 0
+    print("🚀 Welcome to LLMBench!")
+    print("Benchmarking tool for Large Language Models\n")
     
-    services = []
-    
-    if connection_type == 'local':
-        print("Detecting local LLM services...")
-        
-        # Detect available local services
-        detector = ServiceDetector()
-        services = detector.detect_all_services()
-        
-    elif connection_type == 'remote':
-        print("Setting up remote server connection...")
-        
-        # Handle remote server configuration
-        remote_config = RemoteServerConfig()
-        server_url = remote_config.display_server_menu()
-        
-        if not server_url:
-            print("No server selected.")
-            return 0
-        
-        # Prompt for API key
-        api_key = remote_config.prompt_for_api_key(server_url)
-        
-        # Test connection and create service info
-        service_info = remote_config.test_server_connection(server_url)
-        services = [service_info] if service_info else []
-    
-    # Display menu and get user selection
-    menu = ServiceMenu(services)
-    selected_service = menu.display_services()
-    
-    if selected_service:
-        print(f"\nSelected service: {selected_service['name']} at {selected_service['host']}")
-        
-        # Model selection step
-        model_selector = ModelSelector(selected_service)
-        selected_model = model_selector.display_model_menu()
-        
-        if not selected_model:
-            print("No model selected. Returning to main menu.")
-            return 0
-        
-        # Add selected model to service info
-        selected_service['selected_model'] = selected_model
-        
-        print(f"\nReady to benchmark {selected_service['name']} with model: {selected_model}")
-        
-        # Import and run the benchmarking module
+    while True:
         try:
-            import runllmbench
-            runllmbench.run_benchmark(selected_service)
-        except ImportError:
-            print("Error: runllmbench.py not found!")
-            return 1
+            # First, ask for connection type
+            connection_type = display_connection_type_menu()
+            if not connection_type:
+                print("👋 Thank you for using LLMBench!")
+                return 0
+            
+            services = []
+            
+            if connection_type == 'local':
+                print("Detecting local LLM services...")
+                
+                # Detect available local services
+                detector = ServiceDetector()
+                services = detector.detect_all_services()
+                
+            elif connection_type == 'remote':
+                print("Setting up remote server connection...")
+                
+                # Handle remote server configuration
+                remote_config = RemoteServerConfig()
+                server_url = remote_config.display_server_menu()
+                
+                if not server_url:
+                    print("No server selected. Returning to main menu.")
+                    continue  # Go back to connection type menu
+                
+                # Prompt for API key
+                api_key = remote_config.prompt_for_api_key(server_url)
+                
+                # Test connection and create service info
+                service_info = remote_config.test_server_connection(server_url)
+                services = [service_info] if service_info else []
+            
+            # Display menu and get user selection
+            menu = ServiceMenu(services)
+            selected_service = menu.display_services()
+            
+            if not selected_service:
+                continue  # Go back to connection type menu
+            
+            print(f"\nSelected service: {selected_service['name']} at {selected_service['host']}")
+            
+            # Model selection step
+            model_selector = ModelSelector(selected_service)
+            selected_model = model_selector.display_model_menu()
+            
+            if not selected_model:
+                print("No model selected. Returning to main menu.")
+                continue  # Go back to connection type menu
+            
+            # Add selected model to service info
+            selected_service['selected_model'] = selected_model
+            
+            print(f"\nReady to benchmark {selected_service['name']} with model: {selected_model}")
+            
+            # Import and run the benchmarking module
+            try:
+                import runllmbench
+                runllmbench.run_benchmark(selected_service)
+                
+                # After benchmark completion, ask user what to do next
+                print("\n" + "="*60)
+                print("BENCHMARK COMPLETED")
+                print("="*60)
+                
+                while True:
+                    print("\nWhat would you like to do next?")
+                    print("1. Run another benchmark")
+                    print("2. Benchmark same service with different model")
+                    print("3. Benchmark same service and model with different prompts")
+                    print("0. Exit LLMBench")
+                    
+                    try:
+                        choice = input("\nEnter your choice (0-3): ").strip()
+                        
+                        if choice == '0':
+                            print("👋 Thank you for using LLMBench!")
+                            return 0
+                        elif choice == '1':
+                            # Return to main menu (connection type selection)
+                            break
+                        elif choice == '2':
+                            # Reselect model for same service
+                            model_selector = ModelSelector(selected_service)
+                            new_model = model_selector.display_model_menu()
+                            
+                            if new_model:
+                                selected_service['selected_model'] = new_model
+                                print(f"\nReady to benchmark {selected_service['name']} with model: {new_model}")
+                                runllmbench.run_benchmark(selected_service)
+                                continue  # Show post-benchmark menu again
+                            else:
+                                print("No model selected.")
+                                break
+                        elif choice == '3':
+                            # Run benchmark again with same service and model
+                            print(f"\nRunning benchmark again: {selected_service['name']} with model: {selected_service['selected_model']}")
+                            runllmbench.run_benchmark(selected_service)
+                            continue  # Show post-benchmark menu again
+                        else:
+                            print("Please enter 0, 1, 2, or 3")
+                            continue
+                            
+                    except KeyboardInterrupt:
+                        print("\n👋 Thank you for using LLMBench!")
+                        return 0
+                    except Exception as e:
+                        print(f"Invalid input: {e}")
+                        continue
+                
+            except ImportError:
+                print("Error: runllmbench.py not found!")
+                input("Press Enter to continue...")
+                continue
+            except Exception as e:
+                print(f"Error running benchmark: {e}")
+                input("Press Enter to continue...")
+                continue
+                
+        except KeyboardInterrupt:
+            print("\n👋 Thank you for using LLMBench!")
+            return 0
         except Exception as e:
-            print(f"Error running benchmark: {e}")
-            return 1
-    
-    return 0
+            print(f"Unexpected error: {e}")
+            input("Press Enter to continue...")
+            continue
 
 if __name__ == "__main__":
     sys.exit(main())

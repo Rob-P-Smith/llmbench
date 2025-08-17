@@ -79,6 +79,7 @@ class LiveBenchmarkDisplay:
         self.display_lock = threading.Lock()
         self.running = False
         
+        
     def start_session(self):
         """Start a new benchmark session"""
         self.running = True
@@ -206,6 +207,9 @@ Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         
         # Display metrics
         print(f"\\nMETRICS:")
+        # Show live elapsed time that updates in real-time
+        current_elapsed = time.time() - metrics.start_time
+        print(f"Elapsed Time:           {current_elapsed:.3f} seconds")
         print(f"Total Elapsed Time:     {metrics.total_elapsed:.3f} seconds")
         
         if metrics.first_token_time:
@@ -233,11 +237,8 @@ Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         print(f"{'='*80}")
         
         if metrics.response_text:
-            # Truncate response for display if too long
-            display_response = metrics.response_text
-            if len(display_response) > 2000:
-                display_response = display_response[:2000] + "\\n[... truncated for display ...]"
-            print(display_response)
+            # Show full response (no truncation)
+            print(metrics.response_text)
         else:
             print("[Waiting for response...]")
         

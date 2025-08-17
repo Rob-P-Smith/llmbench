@@ -50,7 +50,7 @@ class LLMBenchSetup:
         # Files to copy
         source_files = [
             "llmbench.py", "runllmbench.py", "savellmbench.py", 
-            "remoteconfig.py", "requirements.txt", ".env", "README.md"
+            "remoteconfig.py", "custom_prompts.py", "requirements.txt", ".env", "README.md"
         ]
         
         print("📋 Copying source files...")

@@ -364,29 +364,320 @@ RESPONSE:
 
 ## 🏗️ Building for Windows
 
-### Create Standalone Executable
+### 🚀 Recommended: Automated Build Script
+
+**Use the enhanced build script for the best experience:**
+
+```bash
+# Navigate to project directory
+cd LLMBench
+
+# Run the enhanced build script
+python build_enhanced.py
+```
+
+**Enhanced build (`build_enhanced.py`):**
+- ✅ Installs all required dependencies automatically
+- ✅ Handles Windows permission errors gracefully
+- ✅ Forces inclusion of all Python modules (fixes import issues)
+- ✅ Creates standalone executable in `dist/llmbench.exe`
+- ✅ Clean console interface with reduced flashing
+- ✅ Full streaming benchmark experience
+- ✅ Real-time elapsed timer display
+- ✅ Custom prompt support included
+
+### 📋 Manual Build (Alternative)
+
+If you prefer manual control:
 
 ```bash
 # Install PyInstaller
 pip install pyinstaller
 
-# Build executable
-pyinstaller --onefile --name=LLMBench llmbench.py
+# Clean previous builds
+rm -rf build dist __pycache__ *.spec
 
-# Executable will be in dist/LLMBench.exe
+# Build with comprehensive module inclusion
+pyinstaller --onefile \
+    --name=llmbench \
+    --collect-all=requests \
+    --collect-all=urllib3 \
+    --collect-all=certifi \
+    --collect-all=charset_normalizer \
+    --collect-all=idna \
+    --collect-all=psutil \
+    --collect-all=dotenv \
+    --hidden-import=runllmbench \
+    --hidden-import=savellmbench \
+    --hidden-import=remoteconfig \
+    --add-data=".env;." \
+    --clean \
+    --noconfirm \
+    llmbench.py
+
+# Executable will be in dist/llmbench.exe
 ```
 
-### Create Portable Package
+### 📦 Create Portable Distribution Package
 
 ```bash
-# Create distribution folder
-mkdir LLMBench-Portable
-cp *.py LLMBench-Portable/
-cp .env LLMBench-Portable/
-cp requirements.txt LLMBench-Portable/
+# After building, create distribution package
+mkdir LLMBench-Windows-Portable
+cp dist/llmbench.exe LLMBench-Windows-Portable/
+cp .env LLMBench-Windows-Portable/
+cp README.md LLMBench-Windows-Portable/
 
-# Create run script
-echo "python llmbench.py" > LLMBench-Portable/run.bat
+# Create quick start guide
+cat > LLMBench-Windows-Portable/QUICKSTART.txt << 'EOF'
+LLMBench - Windows Portable
+
+Quick Start:
+1. Double-click llmbench.exe
+2. Select Local or Remote connection
+3. Choose your service and model
+4. Run benchmarks!
+
+No Python installation required.
+Results saved to results/ folder.
+EOF
+
+# Create ZIP for distribution
+zip -r LLMBench-Windows-Portable.zip LLMBench-Windows-Portable/
+```
+
+### 🔧 Troubleshooting Windows Build
+
+**If you encounter module import errors:**
+1. **Use `build_enhanced.py`** - it handles most common issues automatically
+2. **Check Python environment** - ensure all dependencies are installed
+3. **Try fresh virtual environment** if issues persist
+
+**Common issues and fixes:**
+- **"No module named 'requests'"** → Use `build_enhanced.py` (automatically fixed)
+- **"Windows protected your PC"** → Click "More info" → "Run anyway"
+- **Antivirus blocking** → Add exception for the executable
+
+## 🐧 Linux Setup and Usage
+
+### 🚀 Quick Start (Recommended)
+
+**1. Install Dependencies:**
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install python3 python3-pip python3-venv git
+
+# CentOS/RHEL/Fedora
+sudo dnf install python3 python3-pip python3-venv git
+# or for older versions:
+# sudo yum install python3 python3-pip python3-venv git
+
+# Arch Linux
+sudo pacman -S python python-pip git
+```
+
+**2. Clone and Setup:**
+```bash
+# Clone the repository
+git clone https://github.com/Rob-P-Smith/llmbench.git
+cd llmbench
+
+# Run automatic setup
+python3 setup.py --setup
+```
+
+**3. Run LLMBench:**
+```bash
+# If ~/.local/bin is in your PATH
+llmbench
+
+# Or run directly
+~/LLMBench/llmbench
+
+# Or from installation directory
+cd ~/LLMBench && ./llmbench
+```
+
+### 📋 Manual Linux Setup
+
+**For advanced users who prefer manual control:**
+
+```bash
+# Navigate to project directory
+cd llmbench
+
+# Check Python version (3.8+ required)
+python3 --version
+
+# Create and activate virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run LLMBench
+python3 llmbench.py
+```
+
+### 🔧 Linux Build (PyInstaller)
+
+**Create a Linux executable:**
+
+```bash
+# Install PyInstaller in virtual environment
+pip install pyinstaller
+
+# Use the enhanced build script (adapted for Linux)
+python3 build_windowed.py
+
+# Or manual PyInstaller command
+pyinstaller --onefile \
+    --name=llmbench \
+    --collect-all=requests \
+    --collect-all=urllib3 \
+    --collect-all=certifi \
+    --collect-all=charset_normalizer \
+    --collect-all=idna \
+    --collect-all=psutil \
+    --collect-all=dotenv \
+    --hidden-import=runllmbench \
+    --hidden-import=savellmbench \
+    --hidden-import=remoteconfig \
+    --hidden-import=custom_prompts \
+    --add-data=".env:." \
+    --clean \
+    --noconfirm \
+    llmbench.py
+
+# Executable will be in dist/llmbench
+./dist/llmbench
+```
+
+### 🐳 Docker Support
+
+**Run LLMBench in a container:**
+
+```dockerfile
+# Create Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+EXPOSE 8080
+
+CMD ["python3", "llmbench.py"]
+```
+
+```bash
+# Build and run
+docker build -t llmbench .
+docker run -it --rm --network host llmbench
+```
+
+### 🔌 LLM Service Setup on Linux
+
+**Ollama:**
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Start Ollama service
+ollama serve
+
+# Pull a model (in another terminal)
+ollama pull phi3:mini
+```
+
+**vLLM:**
+```bash
+# Install vLLM
+pip install vllm
+
+# Start vLLM server
+python -m vllm.entrypoints.api_server \
+    --model microsoft/DialoGPT-medium \
+    --host 0.0.0.0 \
+    --port 8000
+```
+
+**Llama.cpp:**
+```bash
+# Build llama.cpp
+git clone https://github.com/ggerganov/llama.cpp
+cd llama.cpp
+make
+
+# Start server (with your GGUF model)
+./server -m your-model.gguf --host 0.0.0.0 --port 8080
+```
+
+### 🐛 Linux Troubleshooting
+
+**Common Issues:**
+
+**"Permission denied" for ~/.local/bin/llmbench:**
+```bash
+chmod +x ~/.local/bin/llmbench
+```
+
+**Missing Python development headers:**
+```bash
+# Ubuntu/Debian
+sudo apt install python3-dev
+
+# CentOS/RHEL/Fedora
+sudo dnf install python3-devel
+```
+
+**Virtual environment activation issues:**
+```bash
+# Make sure you're in the right directory
+cd ~/LLMBench
+source venv/bin/activate
+
+# Or use absolute path
+source ~/LLMBench/venv/bin/activate
+```
+
+**Display/terminal issues:**
+```bash
+# If ANSI codes don't work, set fallback
+export TERM=xterm-256color
+
+# For tmux/screen users
+export TERM=screen-256color
+```
+
+**Network/firewall issues:**
+```bash
+# Check if LLM service is accessible
+curl http://localhost:11434/api/tags  # Ollama
+curl http://localhost:8000/v1/models  # vLLM
+curl http://localhost:8080/health     # Llama.cpp
+
+# Open firewall if needed (for remote access)
+sudo ufw allow 11434  # Ollama
+sudo ufw allow 8000   # vLLM
+sudo ufw allow 8080   # Llama.cpp
+```
+
+### 📊 Performance Tips for Linux
+
+**For better performance:**
+```bash
+# Increase ulimits for large models
+ulimit -n 65536
+
+# Use faster JSON parsing (optional)
+pip install ujson
+
+# Monitor resources during benchmarking
+htop
+nvidia-smi  # For GPU monitoring
 ```
 
 ## 🔧 Development

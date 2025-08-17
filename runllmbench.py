@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import os
 from savellmbench import LiveBenchmarkDisplay, create_live_display
+from custom_prompts import CustomPromptsManager
 
 @dataclass
 class BenchmarkMetrics:
@@ -33,24 +34,31 @@ class LLMBenchmarkRunner:
         self.host = service_info['host']
         self.selected_model = service_info.get('selected_model', 'default')
         self.live_display = create_live_display(service_info)
+        self.custom_prompts_manager = CustomPromptsManager()
         
         # Define canned prompts for testing
         self.canned_prompts = {
-            "Prompt 1": "Write a short story about a robot learning to paint.",
-            "Prompt 2": "Explain the concept of quantum computing in simple terms.",
+            "Prompt 1": "Write a 200 word story about a robot learning to paint.",
+            "Prompt 2": "Explain the concept of quantum computing in 500 words or less.",
             "Prompt 3": "Create a recipe for a healthy breakfast that takes under 10 minutes to prepare.",
             "Prompt 4": "Write a Python function that calculates the fibonacci sequence up to n numbers.",
             "Prompt 5": "Describe what you would see on a walk through a forest in autumn."
         }
     
-    def get_api_endpoint_and_payload(self, prompt: str) -> Tuple[str, Dict]:
+    def get_all_prompts(self) -> Dict[str, str]:
+        """Get combined canned and custom prompts"""
+        all_prompts = self.canned_prompts.copy()
+        all_prompts.update(self.custom_prompts_manager.get_custom_prompts())
+        return all_prompts
+    
+    def get_api_endpoint_and_payload(self, prompt: str, streaming: bool = True) -> Tuple[str, Dict]:
         """Get the appropriate API endpoint and payload for each service"""
         if self.service_name == "Ollama":
             endpoint = f"{self.host}/api/generate"
             payload = {
                 "model": self.selected_model,
                 "prompt": prompt,
-                "stream": False
+                "stream": streaming
             }
         elif self.service_name == "vLLM":
             endpoint = f"{self.host}/v1/completions"
@@ -58,23 +66,195 @@ class LLMBenchmarkRunner:
                 "model": self.selected_model,
                 "prompt": prompt,
                 "max_tokens": 500,
-                "stream": False
+                "stream": streaming
             }
         elif self.service_name == "Llama.cpp":
             endpoint = f"{self.host}/completion"
             payload = {
                 "prompt": prompt,
                 "n_predict": 500,
-                "stream": False
+                "stream": streaming
             }
         else:
             raise ValueError(f"Unsupported service: {self.service_name}")
         
         return endpoint, payload
     
+    def make_streaming_request(self, prompt: str, prompt_name: str) -> BenchmarkMetrics:
+        """Make streaming API request with real-time updates"""
+        endpoint, payload = self.get_api_endpoint_and_payload(prompt, streaming=True)
+        
+        # Get authentication headers if available
+        headers = self.service_info.get('auth_headers', {'Content-Type': 'application/json'})
+        
+        # Start the live display for this prompt
+        self.live_display.start_prompt_benchmark(prompt_name, prompt)
+        
+        # Record start time
+        start_time = time.time()
+        first_token_time = None
+        accumulated_response = ""
+        total_tokens = 0
+        
+        try:
+            # Make streaming request
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=600, stream=True)
+            response.raise_for_status()
+            
+            # Track last display update time for periodic refreshes
+            last_display_update = time.time()
+            
+            # Process streaming response
+            for line in response.iter_lines(decode_unicode=True):
+                if line.strip():
+                    try:
+                        # Parse JSON line for streaming response
+                        if self.service_name == "Ollama":
+                            data = json.loads(line)
+                            
+                            # Mark first token time
+                            if first_token_time is None:
+                                first_token_time = time.time()
+                                self.live_display.update_first_token()
+                            
+                            # Extract response chunk
+                            chunk = data.get('response', '')
+                            accumulated_response += chunk
+                            
+                            # Update live display with incremental content
+                            if chunk:
+                                # Estimate tokens (rough approximation)
+                                estimated_tokens = int(len(accumulated_response.split()) * 1.3)
+                                self.live_display.update_response(chunk, estimated_tokens)
+                            
+                            # Periodic display refresh for live timer (every 0.5 seconds)
+                            current_time = time.time()
+                            if current_time - last_display_update >= 0.5:
+                                self.live_display._update_display()
+                                last_display_update = current_time
+                            
+                            # Check if done
+                            if data.get('done', False):
+                                total_tokens = data.get('eval_count', estimated_tokens)
+                                break
+                                
+                        elif self.service_name == "vLLM":
+                            # vLLM streaming format
+                            if line.startswith('data: '):
+                                json_str = line[6:]  # Remove 'data: ' prefix
+                                if json_str.strip() == '[DONE]':
+                                    break
+                                    
+                                data = json.loads(json_str)
+                                choices = data.get('choices', [])
+                                if choices:
+                                    # Mark first token time
+                                    if first_token_time is None:
+                                        first_token_time = time.time()
+                                        self.live_display.update_first_token()
+                                    
+                                    chunk = choices[0].get('text', '')
+                                    accumulated_response += chunk
+                                    
+                                    if chunk:
+                                        estimated_tokens = int(len(accumulated_response.split()) * 1.3)
+                                        self.live_display.update_response(chunk, estimated_tokens)
+                                        
+                                        # Periodic display refresh for live timer
+                                        current_time = time.time()
+                                        if current_time - last_display_update >= 0.5:
+                                            self.live_display._update_display()
+                                            last_display_update = current_time
+                                        
+                        elif self.service_name == "Llama.cpp":
+                            # Llama.cpp streaming format
+                            data = json.loads(line)
+                            
+                            # Mark first token time
+                            if first_token_time is None:
+                                first_token_time = time.time()
+                                self.live_display.update_first_token()
+                            
+                            chunk = data.get('content', '')
+                            accumulated_response += chunk
+                            
+                            if chunk:
+                                estimated_tokens = int(len(accumulated_response.split()) * 1.3)
+                                self.live_display.update_response(chunk, estimated_tokens)
+                                
+                                # Periodic display refresh for live timer
+                                current_time = time.time()
+                                if current_time - last_display_update >= 0.5:
+                                    self.live_display._update_display()
+                                    last_display_update = current_time
+                            
+                            # Check if generation is complete
+                            if data.get('stop', False):
+                                total_tokens = data.get('tokens_predicted', estimated_tokens)
+                                break
+                                
+                    except json.JSONDecodeError:
+                        # Skip malformed JSON lines
+                        continue
+                
+                # Update display periodically even if no new content (for live timer)
+                current_time = time.time()
+                if current_time - last_display_update >= 1.0:  # Every 1 second when no new content
+                    self.live_display._update_display()
+                    last_display_update = current_time
+            
+            # Record completion time
+            end_time = time.time()
+            
+            # Use first token time or start time if no tokens received
+            if first_token_time is None:
+                first_token_time = start_time
+            
+            # Final token count estimate if not provided
+            if total_tokens == 0:
+                total_tokens = int(len(accumulated_response.split()) * 1.3)
+            
+            # Update live display with final response
+            self.live_display.complete_prompt_benchmark(accumulated_response, total_tokens)
+            
+            # Calculate metrics
+            total_time = end_time - start_time
+            prompt_delay_time = first_token_time - start_time
+            generation_time = end_time - first_token_time
+            
+            # Avoid division by zero
+            tokens_per_second = total_tokens / generation_time if generation_time > 0 else 0
+            request_tokens_per_second = total_tokens / total_time if total_time > 0 else 0
+            
+            return BenchmarkMetrics(
+                total_time=total_time,
+                prompt_delay_time=prompt_delay_time,
+                generation_time=generation_time,
+                total_tokens=total_tokens,
+                tokens_per_second=tokens_per_second,
+                request_tokens_per_second=request_tokens_per_second,
+                prompt_name=prompt_name,
+                service_name=self.service_name
+            )
+            
+        except requests.exceptions.RequestException as e:
+            print(f"Streaming API request failed: {e}")
+            raise
+        except Exception as e:
+            print(f"Error processing streaming response: {e}")
+            raise
+    
     def make_api_request_with_live_display(self, prompt: str, prompt_name: str) -> BenchmarkMetrics:
-        """Make API request with live display updates"""
-        endpoint, payload = self.get_api_endpoint_and_payload(prompt)
+        """Make API request with live display updates (fallback to non-streaming)"""
+        # Try streaming first
+        try:
+            return self.make_streaming_request(prompt, prompt_name)
+        except Exception as e:
+            print(f"Streaming failed ({e}), falling back to non-streaming...")
+            time.sleep(1)  # Brief pause before fallback
+            
+        # Fallback to non-streaming
+        endpoint, payload = self.get_api_endpoint_and_payload(prompt, streaming=False)
         
         # Get authentication headers if available
         headers = self.service_info.get('auth_headers', {'Content-Type': 'application/json'})
@@ -87,7 +267,7 @@ class LLMBenchmarkRunner:
         
         try:
             # Make the request with authentication headers
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=180)
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=600)
             
             # Record when we get first response (approximates first token time)
             first_token_time = time.time()
@@ -126,10 +306,10 @@ class LLMBenchmarkRunner:
             )
             
         except requests.exceptions.RequestException as e:
-            print(f"API request failed: {e}")
+            print(f"Non-streaming API request failed: {e}")
             raise
         except Exception as e:
-            print(f"Error processing response: {e}")
+            print(f"Error processing non-streaming response: {e}")
             raise
     
     def extract_response_info(self, result: Dict) -> Tuple[str, int]:
@@ -213,28 +393,44 @@ class LLMBenchmarkRunner:
         print(f"Average Request Speed:    {avg_req_speed:.2f} tokens/sec")
         print(f"{'='*80}")
 
-def prompt_selection_menu(prompts: Dict[str, str]) -> List[str]:
+def prompt_selection_menu(runner: LLMBenchmarkRunner) -> List[str]:
     """Display menu for prompt selection and return selected prompt names"""
-    print(f"\n{'='*60}")
-    print("SELECT PROMPTS TO BENCHMARK")
-    print(f"{'='*60}")
-    
-    # Display available prompts
-    prompt_list = list(prompts.keys())
-    for i, prompt_name in enumerate(prompt_list, 1):
-        print(f"{i}. {prompt_name}")
-        print(f"   \"{prompts[prompt_name][:50]}{'...' if len(prompts[prompt_name]) > 50 else ''}\"")
-        print()
-    
-    print(f"{len(prompt_list) + 1}. Run ALL prompts")
-    print("0. Return to main menu")
     
     while True:
+        # Get current prompts (includes both canned and custom)
+        all_prompts = runner.get_all_prompts()
+        
+        print(f"\n{'='*60}")
+        print("SELECT PROMPTS TO BENCHMARK")
+        print(f"{'='*60}")
+        
+        # Display available prompts
+        prompt_list = list(all_prompts.keys())
+        for i, prompt_name in enumerate(prompt_list, 1):
+            print(f"{i}. {prompt_name}")
+            prompt_text = all_prompts[prompt_name]
+            preview = prompt_text[:50] + ('...' if len(prompt_text) > 50 else '')
+            print(f"   \"{preview}\"")
+            print()
+        
+        print(f"{len(prompt_list) + 1}. Run ALL prompts")
+        print("0. Add custom prompt")
+        print("99. Return to main menu")
+        
         try:
-            choice = input(f"\nEnter your choice (0-{len(prompt_list) + 1}): ").strip()
+            choice = input(f"\nEnter your choice (0, 1-{len(prompt_list) + 1}, 99): ").strip()
             
-            if choice == '0':
+            if choice == '99':
                 return []
+            elif choice == '0':
+                # Add custom prompt
+                custom_prompt_text = runner.custom_prompts_manager.get_prompt_input()
+                if custom_prompt_text:
+                    prompt_name = runner.custom_prompts_manager.add_custom_prompt(custom_prompt_text)
+                    print(f"\n✓ Custom prompt added as '{prompt_name}'")
+                    print("You can now select it from the updated menu.")
+                # Continue to show menu again with new prompt
+                continue
             elif choice == str(len(prompt_list) + 1):
                 return prompt_list
             else:
@@ -242,7 +438,7 @@ def prompt_selection_menu(prompts: Dict[str, str]) -> List[str]:
                 if 1 <= choice_num <= len(prompt_list):
                     return [prompt_list[choice_num - 1]]
                 else:
-                    print(f"Please enter a number between 0 and {len(prompt_list) + 1}")
+                    print(f"Please enter a valid number (0, 1-{len(prompt_list) + 1}, or 99)")
         except ValueError:
             print("Please enter a valid number")
         except KeyboardInterrupt:
@@ -264,7 +460,7 @@ def run_benchmark(service_info: Dict):
             return
     
     # Show prompt selection menu
-    selected_prompts = prompt_selection_menu(runner.canned_prompts)
+    selected_prompts = prompt_selection_menu(runner)
     
     if not selected_prompts:
         print("No prompts selected. Returning to main menu.")
@@ -280,8 +476,9 @@ def run_benchmark(service_info: Dict):
     try:
         # Run benchmarks
         all_metrics = []
+        all_prompts = runner.get_all_prompts()
         for prompt_name in selected_prompts:
-            prompt_text = runner.canned_prompts[prompt_name]
+            prompt_text = all_prompts[prompt_name]
             metrics = runner.run_single_benchmark(prompt_name, prompt_text)
             
             if metrics:
